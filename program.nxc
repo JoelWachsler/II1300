@@ -111,6 +111,9 @@ task check_line()
             // Go in reversed direction!
             // TAKE CONTROL OVER THE MOTOR
 
+            // We need to find the target again after finishing this
+            target = false;
+
             // Go back a little bit before turning
             RotateMotorEx(OUT_AB, HIGH_SPEED, -180, 0, true, true);
             // If the other robot is not in the range of -120 and 120 degrees
