@@ -27,23 +27,30 @@
 #define LEFT 3
 
 // Define rotation directions
-#define ROTATE_RIGHT 1
-#define ROTATE_LEFT 0
+#define ROTATE_RIGHT 0
+#define ROTATE_LEFT 1
 
 // Define threshhold value for the light sensor
-#define THRESHOLD 40
+#define THRESHOLD 30
 
 // Define sonar sensitivity range
 #define US_THRESHOLD 150
 
+// Sonar lock variable
+bool locked = false;
+short target = 0;
+
 // Tell the robot to rotate
-void rotate(int deg, bool direction)
+void rotate(bool direction, int deg)
 {
+    // One degree is only a half one when rotating
+    deg *= 2;
+
     // Holder for starting rotation
     int startingRotation = 0;
-    // Right or left
-    // Right = true
-    // Left = false
+    // Left or Right
+    // Left = true
+    // Right = false
     if (direction)
     {
         startingRotation = MotorRotationCount(OUT_A);
@@ -64,7 +71,7 @@ void rotate(int deg, bool direction)
 }
 
 // Tell the robot to go in a certain way
-void go(short way, short rotations)
+void go(short way, short degrees)
 {
     int startingRotation = MotorRotationCount(OUT_A);
     switch(way)
@@ -73,19 +80,21 @@ void go(short way, short rotations)
             // Start motor and sync them
             OnFwdSync(OUT_AB, HIGH_SPEED, 0);
             // Rotate until right rotation
-            until(MotorRotationCount(OUT_A) > startingRotation + rotations);
+            until(MotorRotationCount(OUT_A) > startingRotation + degrees);
             break;
         case LEFT:
-            OnFwdSync(OUT_AB, HIGH_SPEED, -50);
-            until(MotorRotationCount(OUT_A) > startingRotation + rotations);
+            OnFwd(OUT_A, HIGH_SPEED);
+            OnFwd(OUT_B, MEDIUM_SPEED);
+            until(MotorRotationCount(OUT_A) > startingRotation + degrees);
             break;
         case RIGHT:
-            OnFwdSync(OUT_AB, HIGH_SPEED, 50);
-            until(MotorRotationCount(OUT_B) > startingRotation + rotations);
+            OnFwd(OUT_A, MEDIUM_SPEED);
+            OnFwd(OUT_B, HIGH_SPEED);
+            until(MotorRotationCount(OUT_B) > startingRotation + degrees);
             break;
         case BACK:
-            OnFwdSync(OUT_AB, -HIGH_SPEED, 50);
-            until(MotorRotationCount(OUT_B) > startingRotation + rotations);
+            OnFwdSync(OUT_AB, -HIGH_SPEED, 0);
+            until(MotorRotationCount(OUT_A) < -(startingRotation + degrees));
             break;
     }
 
@@ -104,16 +113,16 @@ task check_line()
     while (true)
     {
         // Check light value
-        if (Sensor(IN_3) > THRESHOLD)
+        if (Sensor(IN_3) < THRESHOLD)
         {
             // Go in reversed direction!
             // TAKE CONTROL OVER THE MOTOR
 
             // Go back a little bit before turning
-            RotateMotorEx(OUT_AB, 100, 360, 0, true, true);
+            RotateMotorEx(OUT_AB, 100, -180, 0, true, true);
             // And now turn 180 degrees
             // TODO: Change later so we rotate the right way!
-            RotateMotorEx(OUT_AB, 100, 180, -100, true, true);
+            RotateMotorEx(OUT_AB, 100, 360, -100, true, true);
         }
 
         // Don't overload the cpu!
@@ -128,40 +137,71 @@ bool us_see()
     return (SensorUS(IN_4) < US_THRESHOLD) ? true : false;
 }
 
-// This function will lock the UltraSonic sensor to the target
-void lock()
+void turnUS(bool direction, short degrees)
 {
+    RotateMotor(OUT_C, SLOW_SPEED, (direction ? 1 : -1)*degrees);
+}
+
+task rotate_sonar()
+{
+    // Reset motor position
+    int startingRotation = MotorRotationCount(OUT_C);
+
+    // Target found?
+    bool target = false;
+    int turns = 0;
+
+    // Turning variable
+    int i = 0;
+
+    while (true)
+    {
+        if (!locked)
+        {
+            if (turns % 2 == 0)
+            {
+                turnUS(ROTATE_LEFT, 360);
+            }
+            else
+            {
+                turnUS(ROTATE_RIGHT, 360);
+            }
+            turns++;
+        }
+        else
+        {
+        }
+
+        Wait(100);
+    }
 }
 
 task sonar()
 {
-    // Set sensor ultrasonic to sensor 4
     SetSensorLowspeed(IN_4);
-    int startingRotation = MotorRotationCount(OUT_C);
 
-    while (true)
+    // Value of sensor
+    short sensorVal = 0;
+
+    while(true)
     {
-        // Turn right 360 degrees or untill it detecs something
-        OnFwd(OUT_C, SLOW_SPEED);
-        until(MotorRotationCount(OUT_C) > startingRotation + 360 || SensorUS(IN_4) < US_THRESHOLD);
-        Off(OUT_C);
-
-        if (us_see())
-            // Temp break to see if it finds anything
-            break;
-
-        // Turn right 360 degrees or untill it detecs something
-        OnFwd(OUT_C, -SLOW_SPEED);
-        until(MotorRotationCount(OUT_C) < startingRotation + 360 || SensorUS(IN_4) < US_THRESHOLD);
-        Off(OUT_C);
-
         // Don't overload the CPU!
         Wait(100);
+        ClearScreen();
+        sensorVal = SensorUS(IN_4);
+        target = MotorRotationCount(OUT_C);
+        locked = true;
 
-        if (us_see())
-            // Temp break to see if it finds anything
-            break;
+        NumOut(0, 0, sensorVal);
+        NumOut(0, 10, target);
     }
+}
+
+task movement()
+{
+    go(FORWARD, 300);
+    rotate(ROTATE_LEFT, 180);
+    go(FORWARD, 300);
 }
 
 task main()
@@ -171,11 +211,12 @@ task main()
      **/
     // Start tasks
     /*Precedes(check_line, sonar);*/
+    /*Precedes(check_line, movement, sonar);*/
+    /*Precedes(rotateSonar, movement);*/
+    /*Precedes(rotate_sonar, sonar);*/
+    Precedes(movement);
 
     // Testing to see if everything works!
-    rotate(360, ROTATE_RIGHT);
-    go(FORWARD, 2);
-    rotate(180, ROTATE_LEFT);
-    go(LEFT, 1);
-    go(RIGHT, 1);
+    /*go(FORWARD, 600);*/
+    /*Wait(500);*/
 }
