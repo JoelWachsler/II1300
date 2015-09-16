@@ -193,6 +193,9 @@ task movement()
         else if(motorRotation < 0)
             // Number is negative, convert
             rotate(RIGHT, abs(motorRotation));
+
+        // A new target has to be found!
+        target = false;
     }
 }
 
