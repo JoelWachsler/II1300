@@ -22,7 +22,7 @@
 #define THRESHOLD 40
 
 // Define sonar sensitivity range
-#define US_THRESHOLD 20
+#define US_THRESHOLD 150
 
 // Motor rotation
 short motorRotation = 0;
