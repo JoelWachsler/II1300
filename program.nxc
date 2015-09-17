@@ -12,6 +12,9 @@
 #define MEDIUM_SPEED 50
 #define SLOW_SPEED 25
 
+// Define sonar rotation
+#define US_ROT 35
+
 // Define ways
 #define RIGHT 0
 #define LEFT 1
@@ -22,7 +25,7 @@
 #define THRESHOLD 40
 
 // Define sonar sensitivity range
-#define US_THRESHOLD 150
+#define US_THRESHOLD 75
 
 // Motor rotation
 short motorRotation = 0;
@@ -30,6 +33,11 @@ short motorRotation = 0;
 short sensorVal = 0;
 // Found the initial target
 bool target = false;
+short targetCounter = 1;
+// SONAR LOCK
+bool sonar_lock = false;
+// Lock the sonar in the inital position
+bool total_sonar_lock = false;
 
 // Tell the robot to rotate
 void rotate(bool direction, int deg)
@@ -73,9 +81,13 @@ void go(short way, short centimeter)
     {
         case FORWARD:
             // Start motor and sync them
+            sonar_lock = true;
+            total_sonar_lock = true;
             OnFwdSync(OUT_AB, HIGH_SPEED, 0);
             // Rotate until right rotation
             until(MotorRotationCount(OUT_A) > startingRotation + degrees);
+            // Unlock sonar
+            total_sonar_lock = false;
             break;
         case BACK:
             OnFwdSync(OUT_AB, -HIGH_SPEED, 0);
@@ -93,6 +105,7 @@ void go(short way, short centimeter)
             break;
     }
 
+    // Reset rotation counter and turn off the motor
     OffEx(OUT_AB, RESET_ALL);
 }
 
@@ -142,14 +155,76 @@ task rotate_sonar()
 {
     // Reset motor position
     int startingRotation = MotorRotationCount(OUT_C);
+    int rotate = targetCounter * 40;
+
+    bool firstRotation = true;
 
     while (true)
     {
-        // Rotate left and right
-        OnFwd(OUT_C, SLOW_SPEED);
-        until(MotorRotationCount(OUT_C) > startingRotation + 180);
-        OnFwd(OUT_C, -SLOW_SPEED);
-        until(MotorRotationCount(OUT_C) < startingRotation - 180);
+        while (total_sonar_lock)
+        {
+            OnFwd(OUT_C, -HIGH_SPEED);
+            until(MotorRotationCount(OUT_C) < startingRotation + 10);
+
+            OnFwd(OUT_C, HIGH_SPEED);
+            until(MotorRotationCount(OUT_C) > startingRotation - 10);
+        }
+
+        if (!sonar_lock)
+        {
+            // Calulcate turn
+            rotate = (targetCounter * 40 >= 180) ? 180 : targetCounter * 40;
+
+            if (firstRotation)
+            {
+                OnFwd(OUT_C, -US_ROT);
+                until(MotorRotationCount(OUT_C) < startingRotation - 180 || sonar_lock);
+
+                // Only do the first rotation once
+                firstRotation = false;
+            }
+
+            // Rotate left and right
+            if (Random(2) == 0)
+            {
+                OnFwd(OUT_C, -US_ROT);
+                until(MotorRotationCount(OUT_C) < startingRotation - rotate || sonar_lock);
+                OnFwd(OUT_C, US_ROT);
+                until(MotorRotationCount(OUT_C) > startingRotation + rotate || sonar_lock);
+            }
+            else
+            {
+                OnFwd(OUT_C, US_ROT);
+                until(MotorRotationCount(OUT_C) > startingRotation + rotate || sonar_lock);
+                OnFwd(OUT_C, -US_ROT);
+                until(MotorRotationCount(OUT_C) < startingRotation - rotate || sonar_lock);
+            }
+
+            // Search for more than one
+            targetCounter++;
+
+            /*if (sonar_lock)*/
+                /*continue;*/
+
+        }
+        else
+        {
+            // Rotate back to inital position
+            sonar_lock = false;
+            if (MotorRotationCount(OUT_C) > 0)
+            {
+                OnFwd(OUT_C, -HIGH_SPEED);
+                until(MotorRotationCount(OUT_C) <= startingRotation);
+            }
+            else
+            {
+                OnFwd(OUT_C, HIGH_SPEED);
+                until(MotorRotationCount(OUT_C) >= startingRotation);
+            }
+
+            RotateMotor(OUT_C, 100, -MotorRotationCount(OUT_C));
+            Off(OUT_C);
+        }
     }
 }
 
@@ -160,50 +235,72 @@ task sonar()
     while(true)
     {
         // Don't overload the CPU!
-        Wait(200);
+        Wait(150);
         ClearScreen();
         sensorVal = SensorUS(IN_4);
 
         // Only detect values over the threshold
         if (sensorVal < US_THRESHOLD)
         {
+            // FOUND A TARGET!
             motorRotation = MotorRotationCount(OUT_C);
             target = true;
+            targetCounter = 0;
         }
 
         // Print values to screen
-        NumOut(0, 0, sensorVal);
-        NumOut(0, 10, motorRotation);
-        NumOut(0, 20, MotorRotationCount(OUT_C));
+        /*NumOut(0, 0, sensorVal);*/
+        /*NumOut(0, 10, motorRotation);*/
+        /*NumOut(0, 20, MotorRotationCount(OUT_C));*/
     }
 }
 
 task movement()
 {
     // We need to find a target before doing anything
-    if (target)
+    while(true)
     {
-        // Go forward if between -10 and 10 degrees
-        if(motorRotation > -10 || motorRotation < 10)
-            go(FORWARD, sensorVal + 10);
-        // Rotate left if positive
-        else if(motorRotation > 0)
-            rotate(LEFT, motorRotation);
-        // Rotate right if negative
-        else if(motorRotation < 0)
-            // Number is negative, convert
-            rotate(RIGHT, abs(motorRotation));
+        if (target)
+        {
+            ClearScreen();
+            NumOut(0, 10, motorRotation);
 
-        // A new target has to be found!
-        target = false;
+            // Go forward if between -10 and 10 degrees
+            if(motorRotation > -25 && motorRotation < 25)
+            {
+                go(FORWARD, sensorVal + 10);
+                // Rotate left if positive
+            }
+            else if(motorRotation > 0)
+            {
+                // Rotate right if negative
+                sonar_lock = true;
+                total_sonar_lock = true;
+                rotate(LEFT, motorRotation);
+                total_sonar_lock = false;
+            }
+            else if(motorRotation < 0)
+            {
+                // Number is negative, convert
+                sonar_lock = true;
+                total_sonar_lock = true;
+                rotate(RIGHT, abs(motorRotation));
+                total_sonar_lock = false;
+            }
+
+            // A new target has to be found!
+            target = false;
+        }
     }
 }
 
 task main()
 {
     // Start tasks
-    Precedes(   sonar,
+    Precedes(
+                sonar,
                 rotate_sonar,
-                movement,
-                check_line);
+                movement
+                /*check_line*/
+                );
 }
