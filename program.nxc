@@ -42,6 +42,8 @@
 // Define sonar sensitivity range
 #define US_THRESHOLD 75
 
+mutex motorMutex;
+
 // Motor rotation
 short motorRotation = 0;
 // Value of sensor
@@ -156,22 +158,31 @@ task check_line()
         if (Sensor(IN_3) > THRESHOLD)
             continue;
 
-        // Go in reversed direction!
-        // TAKE CONTROL OVER THE MOTOR
+        // Don't let other programs control the motor
+        Acquire(motorMutex);
 
-        // We need to find the target again after finishing this
+        // We need to find the target again after finishing
+        // this task
         target = false;
 
         // Go back a little bit before turning
-        RotateMotorEx(OUT_AB, HIGH_SPEED, -180, 0, true, true);
+        go(BACK, 10);
+        // Random left or right
+        rotate((Random(2) & 1) ? LEFT : RIGHT, 180);
+
+        // Release the motor
+        Release(motorMutex);
+
+        // This function is too slow!
+        /*RotateMotorEx(OUT_AB, HIGH_SPEED, -180, 0, true, true);*/
         // If the other robot is not in the range of -120 and 120 degrees
         // turn either left or right
-        if (motorRotation > -120 && motorRotation < 120)
-            // Random if turning left or right
-            RotateMotorEx(OUT_AB, ((Random(2) & 0 ) ? -1 : 1)*HIGH_SPEED, 460, -100, true, true);
-        else
-            // Turn to the direction the other robot is
-            RotateMotorEx(OUT_AB, HIGH_SPEED, (460/360)*motorRotation, -100, true, true);
+        /*if (motorRotation > -120 && motorRotation < 120)*/
+            /*// Random if turning left or right*/
+            /*RotateMotorEx(OUT_AB, ((Random(2) & 0 ) ? -1 : 1)*HIGH_SPEED, 460, -100, true, true);*/
+        /*else*/
+            /*// Turn to the direction the other robot is*/
+            /*RotateMotorEx(OUT_AB, HIGH_SPEED, (460/360)*motorRotation, -100, true, true);*/
     }
 }
 
