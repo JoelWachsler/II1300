@@ -42,15 +42,20 @@
 // Define sonar sensitivity range
 #define US_THRESHOLD 75
 
+// Lock the motor to the task which acquire it
 mutex motorMutex;
 
-// Motor rotation
+// Motor rotation counter for the sonar
 short motorRotation = 0;
-// Value of sensor
+// The range of the ultrasonic sensor if it's
+// shorter than the defined range for US_THRESHOLD
 short sensorVal = 0;
 // Found the initial target
 bool target = false;
-unsigned short targetCounter = 1;
+// Checks how many turns the motor for the
+// ultra sonic sensor has rotated without
+// finding a target
+unsigned short sonarRotationCounter = 1;
 // Lock the sonar in the inital position
 bool total_sonar_lock = false;
 // Check target lock
@@ -58,8 +63,24 @@ bool targetLock = false;
 // Idle timer
 unsigned short idleTimer = 0;
 
+// TODO: PRIORITY CHECKING
+// make tasks with higher priority override
+// tasks/functions with lower priority
+
+// Define all functions and task so they're
+// usable by all functions
+void rotate(const bool direction, int deg);
+void go(const short way, const short centimeter);
+task check_line();
+task rotate_sonar();
+task sonar();
+task random_movement();
+task movement();
+task strategy();
+
+
 // Tell the robot to rotate
-void rotate(bool direction, int deg)
+void rotate(const bool direction, int deg)
 {
     // Reset idletimer
     idleTimer = 0;
@@ -99,7 +120,7 @@ void rotate(bool direction, int deg)
 }
 
 // Tell the robot to go in a certain way
-void go(short way, short centimeter)
+void go(const short way,  const short centimeter)
 {
     // Reset idletimer
     idleTimer = 0;
@@ -124,6 +145,8 @@ void go(short way, short centimeter)
             until(MotorRotationCount(OUT_A) < startingRotation - degrees);
             break;
         case LEFT:
+            // TODO: MAKE LEFT AND RIGHT GO IN A CIRCLE WITH
+            // A DIAMETER OF 20 CM
             OnFwd(OUT_A, HIGH_SPEED);
             OnFwd(OUT_B, MEDIUM_SPEED);
             until(MotorRotationCount(OUT_A) > startingRotation + degrees);
@@ -202,12 +225,11 @@ inline void left_right_or_lock(int startingRotation, int rotate, bool left_right
 
 task rotate_sonar()
 {
+    Follows(strategy);
+
     // Reset motor position
     int startingRotation = MotorRotationCount(OUT_C);
-    int rotate = targetCounter * 40;
-
-    // Go to the right the first rotation
-    left_right_or_lock(startingRotation, 180, RIGHT);
+    int rotate = sonarRotationCounter * 40;
 
     while (true)
     {
@@ -221,8 +243,8 @@ task rotate_sonar()
             until(MotorRotationCount(OUT_C) > startingRotation - 10);
         }
 
-        // Calulcate turn
-        rotate = (targetCounter * 40 >= 180) ? 180 : targetCounter * 40;
+        // Calulcate turn with a maximum of 180 degrees
+        rotate = (sonarRotationCounter * 40 >= 180) ? 180 : sonarRotationCounter * 40;
 
         // Rotate left and right
         if (Random(2) & 1)
@@ -237,7 +259,7 @@ task rotate_sonar()
         }
 
         // Search for more than one
-        targetCounter++;
+        sonarRotationCounter++;
     }
 }
 
@@ -264,7 +286,7 @@ task sonar()
         // FOUND A TARGET!
         motorRotation = MotorRotationCount(OUT_C);
         target = true;
-        targetCounter = 0;
+        sonarRotationCounter = 1;
 
         // True while looking at target
         // For dropping movement if the target
@@ -306,6 +328,8 @@ task random_movement()
 
 task movement()
 {
+    Follows(strategy);
+
     while(true)
     {
         // We need to find a target before doing anything
@@ -328,14 +352,71 @@ task movement()
     }
 }
 
+// Randomizes strategy so the other player can't
+// counter us by looking at a stratergy this robot
+// uses in a certain round
+task strategy()
+{
+    // By having the different strats in an array
+    // we can easily disable them
+    int strats[] = {
+        1,
+        2,
+        3,
+        4,
+        5
+    };
+
+    // Pick a random strat from the array
+    switch(strats[Random(ArrayLen(strats))])
+    {
+        case 1:
+            // Rotate right and just push the other player
+            // out of the ring
+            rotate(RIGHT, 90);
+            go(FORWARD, 50);
+            break;
+        case 2:
+            // Go forwards right and then up, pushing the other
+            // robot from the back
+            go(FORWARD, 20);
+            // TODO: Make 180 degrees right do an arc with a diameter
+            // of 20 cm
+            go(RIGHT, 180);
+            go(FORWARD, 50);
+            break;
+        case 3:
+            // Go around the other robot so we position our front
+            // to the other one's left side and push them
+            go(RIGHT, 90);
+            go(FORWARD, 30);
+            go(RIGHT, 90);
+            go(FORWARD, 50);
+            break;
+        case 4:
+            // Try to counter the other if they try strat#1
+            // Go backwards and then forwards pushing the
+            // other robot off the field
+            go(BACK, 50);
+            go(FORWARD, 100);
+            break;
+        case 5:
+            // Rotate 360 degrees as fast a possible and
+            // try to find the other robot
+            rotate((Random(2) & 1) ? LEFT : RIGHT, 360);
+            break;
+    }
+}
+
 task main()
 {
     // Start tasks
     Precedes(
+                strategy,
+                /*check_line,*/
                 sonar,
                 rotate_sonar,
                 movement,
                 random_movement
-                /*check_line*/
-                );
+            );
 }
