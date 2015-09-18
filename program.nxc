@@ -1,7 +1,23 @@
+/*
+.____                            ________                             ____  ______             _______________  ____ .________
+|    |    ____   ____   ____    /  _____/______  ____  __ ________   /_   |/  __  \            \_____  \   _  \/_   ||   ____/
+|    |  _/ __ \ / ___\ /  _ \  /   \  __\_  __ \/  _ \|  |  \____ \   |   |>      <    ______   /  ____/  /_\  \|   ||____  \
+|    |__\  ___// /_/  >  <_> ) \    \_\  \  | \(  <_> )  |  /  |_> >  |   /   --   \  /_____/  /       \  \_/   \   |/       \
+|_______ \___  >___  / \____/   \______  /__|   \____/|____/|   __/   |___\______  /           \_______ \_____  /___/______  /
+        \/   \/_____/                  \/                   |__|                 \/                    \/     \/           \/
+*/
 /**
- * Author:  Joel Wachsler
- * Date:    2015-09-15
- * Desc:    Lego group 18 robot program for wrestling match
+ * Author:      Joel Wachsler
+ * Date:        2015-09-18
+ * Desc:        Lego group 18 robot program for "KTH DROID WARS 2015".
+ *              This program has a fully functioning AI, it will
+ *              search for the closest target and drive towards it.
+ *
+ * Disclaimer:  You are not allowed to use this program nor copy
+ *              parts of it for use in the "KTH DROID WARS 2015"
+ *              without the permission of all members of
+ *              Lego Group 18.
+ *
  **/
 
 // Include definitions for NXC
@@ -33,15 +49,23 @@ short motorRotation = 0;
 short sensorVal = 0;
 // Found the initial target
 bool target = false;
-short targetCounter = 1;
-// SONAR LOCK
-bool sonar_lock = false;
+unsigned short targetCounter = 1;
 // Lock the sonar in the inital position
 bool total_sonar_lock = false;
+// Check target lock
+bool targetLock = false;
+// Idle timer
+unsigned short idleTimer = 0;
 
 // Tell the robot to rotate
 void rotate(bool direction, int deg)
 {
+    // Reset idletimer
+    idleTimer = 0;
+
+    // Lock sonar when going and rotating
+    total_sonar_lock = true;
+
     // One degree is only a half one when rotating
     deg *= 2;
 
@@ -68,26 +92,31 @@ void rotate(bool direction, int deg)
 
     // Brake the motor before exiting
     OffEx(OUT_AB, RESET_ALL);
+
+    // Unlock sonar
+    total_sonar_lock = false;
 }
 
 // Tell the robot to go in a certain way
 void go(short way, short centimeter)
 {
+    // Reset idletimer
+    idleTimer = 0;
+
     // Converting
     int degrees = 50/3 * centimeter;
     int startingRotation = MotorRotationCount(OUT_A);
+
+    // Lock sonar when going and rotating
+    total_sonar_lock = true;
 
     switch(way)
     {
         case FORWARD:
             // Start motor and sync them
-            sonar_lock = true;
-            total_sonar_lock = true;
             OnFwdSync(OUT_AB, HIGH_SPEED, 0);
             // Rotate until right rotation
-            until(MotorRotationCount(OUT_A) > startingRotation + degrees);
-            // Unlock sonar
-            total_sonar_lock = false;
+            until(MotorRotationCount(OUT_A) > startingRotation + degrees || !targetLock);
             break;
         case BACK:
             OnFwdSync(OUT_AB, -HIGH_SPEED, 0);
@@ -107,6 +136,9 @@ void go(short way, short centimeter)
 
     // Reset rotation counter and turn off the motor
     OffEx(OUT_AB, RESET_ALL);
+
+    // Unlock sonar
+    total_sonar_lock = false;
 }
 
 // Check so we don't pass the line
@@ -118,36 +150,43 @@ task check_line()
     // Constantly check the value of the light sensor
     while (true)
     {
-        // Check light value
-        if (Sensor(IN_3) < THRESHOLD)
-        {
-            // Go in reversed direction!
-            // TAKE CONTROL OVER THE MOTOR
-
-            // We need to find the target again after finishing this
-            target = false;
-
-            // Go back a little bit before turning
-            RotateMotorEx(OUT_AB, HIGH_SPEED, -180, 0, true, true);
-            // If the other robot is not in the range of -120 and 120 degrees
-            // turn either left or right
-            if (motorRotation > -120 && motorRotation < 120)
-                // Random if turning left or right
-                if (Random(1) == 0)
-                    // Turn right
-                    RotateMotorEx(OUT_AB, HIGH_SPEED, 460, -100, true, true);
-                else
-                    // Turn left
-                    RotateMotorEx(OUT_AB, HIGH_SPEED, -460, -100, true, true);
-
-            else
-                // Turn to the direction the other robot is
-                RotateMotorEx(OUT_AB, HIGH_SPEED, (460/360)*motorRotation, -100, true, true);
-
-        }
-
         // Don't overload the cpu!
         Wait(50);
+
+        // Check light value
+        if (Sensor(IN_3) > THRESHOLD)
+            continue;
+
+        // Go in reversed direction!
+        // TAKE CONTROL OVER THE MOTOR
+
+        // We need to find the target again after finishing this
+        target = false;
+
+        // Go back a little bit before turning
+        RotateMotorEx(OUT_AB, HIGH_SPEED, -180, 0, true, true);
+        // If the other robot is not in the range of -120 and 120 degrees
+        // turn either left or right
+        if (motorRotation > -120 && motorRotation < 120)
+            // Random if turning left or right
+            RotateMotorEx(OUT_AB, ((Random(2) & 0 ) ? -1 : 1)*HIGH_SPEED, 460, -100, true, true);
+        else
+            // Turn to the direction the other robot is
+            RotateMotorEx(OUT_AB, HIGH_SPEED, (460/360)*motorRotation, -100, true, true);
+    }
+}
+
+inline void left_right_or_lock(int startingRotation, int rotate, bool left_right)
+{
+    if (left_right)
+    {
+        OnFwd(OUT_C, US_ROT);
+        until(MotorRotationCount(OUT_C) > startingRotation + rotate || total_sonar_lock);
+    }
+    else
+    {
+        OnFwd(OUT_C, -US_ROT);
+        until(MotorRotationCount(OUT_C) < startingRotation - rotate || total_sonar_lock);
     }
 }
 
@@ -157,10 +196,12 @@ task rotate_sonar()
     int startingRotation = MotorRotationCount(OUT_C);
     int rotate = targetCounter * 40;
 
-    bool firstRotation = true;
+    // Go to the right the first rotation
+    left_right_or_lock(startingRotation, 180, RIGHT);
 
     while (true)
     {
+        // Rotate a low number of degrees when locked
         while (total_sonar_lock)
         {
             OnFwd(OUT_C, -HIGH_SPEED);
@@ -170,127 +211,110 @@ task rotate_sonar()
             until(MotorRotationCount(OUT_C) > startingRotation - 10);
         }
 
-        if (!sonar_lock)
+        // Calulcate turn
+        rotate = (targetCounter * 40 >= 180) ? 180 : targetCounter * 40;
+
+        // Rotate left and right
+        if (Random(2) & 1)
         {
-            // Calulcate turn
-            rotate = (targetCounter * 40 >= 180) ? 180 : targetCounter * 40;
-
-            if (firstRotation)
-            {
-                OnFwd(OUT_C, -US_ROT);
-                until(MotorRotationCount(OUT_C) < startingRotation - 180 || sonar_lock);
-
-                // Only do the first rotation once
-                firstRotation = false;
-            }
-
-            // Rotate left and right
-            if (Random(2) == 0)
-            {
-                OnFwd(OUT_C, -US_ROT);
-                until(MotorRotationCount(OUT_C) < startingRotation - rotate || sonar_lock);
-                OnFwd(OUT_C, US_ROT);
-                until(MotorRotationCount(OUT_C) > startingRotation + rotate || sonar_lock);
-            }
-            else
-            {
-                OnFwd(OUT_C, US_ROT);
-                until(MotorRotationCount(OUT_C) > startingRotation + rotate || sonar_lock);
-                OnFwd(OUT_C, -US_ROT);
-                until(MotorRotationCount(OUT_C) < startingRotation - rotate || sonar_lock);
-            }
-
-            // Search for more than one
-            targetCounter++;
-
-            /*if (sonar_lock)*/
-                /*continue;*/
-
+            left_right_or_lock(startingRotation, rotate, LEFT);
+            left_right_or_lock(startingRotation, rotate, RIGHT);
         }
         else
         {
-            // Rotate back to inital position
-            sonar_lock = false;
-            if (MotorRotationCount(OUT_C) > 0)
-            {
-                OnFwd(OUT_C, -HIGH_SPEED);
-                until(MotorRotationCount(OUT_C) <= startingRotation);
-            }
-            else
-            {
-                OnFwd(OUT_C, HIGH_SPEED);
-                until(MotorRotationCount(OUT_C) >= startingRotation);
-            }
-
-            RotateMotor(OUT_C, 100, -MotorRotationCount(OUT_C));
-            Off(OUT_C);
+            left_right_or_lock(startingRotation, rotate, RIGHT);
+            left_right_or_lock(startingRotation, rotate, LEFT);
         }
+
+        // Search for more than one
+        targetCounter++;
     }
 }
 
 task sonar()
 {
+    // The sonar can't detect in less than 150ms
     SetSensorLowspeed(IN_4);
 
     while(true)
     {
         // Don't overload the CPU!
         Wait(150);
-        ClearScreen();
+        // Update sonar sensor value
         sensorVal = SensorUS(IN_4);
 
         // Only detect values over the threshold
-        if (sensorVal < US_THRESHOLD)
+        if (sensorVal > US_THRESHOLD)
         {
-            // FOUND A TARGET!
-            motorRotation = MotorRotationCount(OUT_C);
-            target = true;
-            targetCounter = 0;
+            // Remove the target lock
+            target = false;
+            continue;
         }
 
-        // Print values to screen
-        /*NumOut(0, 0, sensorVal);*/
-        /*NumOut(0, 10, motorRotation);*/
-        /*NumOut(0, 20, MotorRotationCount(OUT_C));*/
+        // FOUND A TARGET!
+        motorRotation = MotorRotationCount(OUT_C);
+        target = true;
+        targetCounter = 0;
+
+        // True while looking at target
+        // For dropping movement if the target
+        // disappears while moving towards it
+        targetLock = true;
+    }
+}
+
+task random_movement()
+{
+    // Random timer min and max time
+    int starting = 10000;
+    int ending = 25000;
+
+    short start_rotation = 30;
+    short end_rotation = 30;
+
+    short start_forward = 50;
+    short end_forward = 5;
+
+    while (true)
+    {
+        // Do something random if standing still
+        // for a couple of seconds
+        if (idleTimer <= Random(ending-starting)+starting)
+        {
+            Wait(500);
+            idleTimer += 500;
+            continue;
+        }
+
+        // Randomizing movement when idle
+        if (Random(2) & 1)
+            rotate((Random(2) & 1) ? LEFT : RIGHT, Random(end_rotation-start_rotation)+start_rotation);
+        else
+            go(FORWARD, Random(end_forward-start_forward)+start_forward);
     }
 }
 
 task movement()
 {
-    // We need to find a target before doing anything
     while(true)
     {
-        if (target)
-        {
-            ClearScreen();
-            NumOut(0, 10, motorRotation);
+        // We need to find a target before doing anything
+        if (!target)
+            continue;
 
-            // Go forward if between -10 and 10 degrees
-            if(motorRotation > -25 && motorRotation < 25)
-            {
-                go(FORWARD, sensorVal + 10);
-                // Rotate left if positive
-            }
-            else if(motorRotation > 0)
-            {
-                // Rotate right if negative
-                sonar_lock = true;
-                total_sonar_lock = true;
-                rotate(LEFT, motorRotation);
-                total_sonar_lock = false;
-            }
-            else if(motorRotation < 0)
-            {
-                // Number is negative, convert
-                sonar_lock = true;
-                total_sonar_lock = true;
-                rotate(RIGHT, abs(motorRotation));
-                total_sonar_lock = false;
-            }
+        // Go forward if between -10 and 10 degrees
+        if(motorRotation > -25 && motorRotation < 25)
+            go(FORWARD, sensorVal + 10);
+            // Rotate left if positive
+        else if(motorRotation > 0)
+            // Rotate right if negative
+            rotate(LEFT, motorRotation);
+        else if(motorRotation < 0)
+            // Number is negative, convert
+            rotate(RIGHT, abs(motorRotation));
 
-            // A new target has to be found!
-            target = false;
-        }
+        // A new target has to be found!
+        target = false;
     }
 }
 
@@ -300,7 +324,8 @@ task main()
     Precedes(
                 sonar,
                 rotate_sonar,
-                movement
+                movement,
+                random_movement
                 /*check_line*/
                 );
 }
