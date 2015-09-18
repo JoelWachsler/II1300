@@ -10,8 +10,7 @@
  * Author:      Joel Wachsler
  * Date:        2015-09-18
  * Desc:        Lego group 18 robot program for "KTH DROID WARS 2015".
- *              This program has a fully functioning AI, it will
- *              search for the closest target and drive towards it.
+ *              This program has a fully functioning AI.
  *
  * Disclaimer:  You are not allowed to use this program nor copy
  *              parts of it for use in the "KTH DROID WARS 2015"
