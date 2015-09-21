@@ -40,7 +40,8 @@
 #define THRESHOLD 40
 
 // Define sonar sensitivity range
-#define US_THRESHOLD 75
+/*#define US_THRESHOLD 75*/
+#define US_THRESHOLD 30
 
 // Lock the motor to the task which acquire it
 mutex motorMutex;
@@ -69,8 +70,8 @@ unsigned short idleTimer = 0;
 
 // Define all functions and task so they're
 // usable by all functions
-void rotate(const bool direction, int deg);
-void go(const short way, const short centimeter);
+void rotate(bool direction, int deg);
+void go(short way, short centimeter);
 task check_line();
 task rotate_sonar();
 task sonar();
@@ -80,7 +81,7 @@ task strategy();
 
 
 // Tell the robot to rotate
-void rotate(const bool direction, int deg)
+void rotate(bool direction, int deg)
 {
     // Reset idletimer
     idleTimer = 0;
@@ -120,7 +121,7 @@ void rotate(const bool direction, int deg)
 }
 
 // Tell the robot to go in a certain way
-void go(const short way,  const short centimeter)
+void go(short way,  short centimeter)
 {
     // Reset idletimer
     idleTimer = 0;
@@ -138,7 +139,9 @@ void go(const short way,  const short centimeter)
             // Start motor and sync them
             OnFwdSync(OUT_AB, HIGH_SPEED, 0);
             // Rotate until right rotation
-            until(MotorRotationCount(OUT_A) > startingRotation + degrees || !targetLock);
+            // TODO: TEST this
+            until(MotorRotationCount(OUT_A) > startingRotation + degrees || !target);
+            /*until(MotorRotationCount(OUT_A) > startingRotation + degrees);*/
             break;
         case BACK:
             OnFwdSync(OUT_AB, -HIGH_SPEED, 0);
@@ -298,14 +301,14 @@ task sonar()
 task random_movement()
 {
     // Random timer min and max time
-    int starting = 10000;
-    int ending = 25000;
+    unsigned short starting = 10000;
+    unsigned short ending = 25000;
 
-    short start_rotation = 30;
-    short end_rotation = 30;
+    unsigned short start_rotation = 20;
+    unsigned short end_rotation = 180;
 
-    short start_forward = 50;
-    short end_forward = 5;
+    unsigned short start_forward = 5;
+    unsigned short end_forward = 20;
 
     while (true)
     {
@@ -319,6 +322,7 @@ task random_movement()
         }
 
         // Randomizing movement when idle
+
         if (Random(2) & 1)
             rotate((Random(2) & 1) ? LEFT : RIGHT, Random(end_rotation-start_rotation)+start_rotation);
         else
@@ -412,11 +416,11 @@ task main()
 {
     // Start tasks
     Precedes(
-                strategy,
+                /*strategy*/
                 /*check_line,*/
                 sonar,
-                rotate_sonar,
-                movement,
-                random_movement
+                /*rotate_sonar,*/
+                movement
+                /*random_movement*/
             );
 }
