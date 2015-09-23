@@ -1,0 +1,504 @@
+/**
+ * .____                            ________                             ____  ______             _______________  ____ .________
+ * |    |    ____   ____   ____    /  _____/______  ____  __ ________   /_   |/  __  \            \_____  \   _  \/_   ||   ____/
+ * |    |  _/ __ \ / ___\ /  _ \  /   \  __\_  __ \/  _ \|  |  \____ \   |   |>      <    ______   /  ____/  /_\  \|   ||____  \
+ * |    |__\  ___// /_/  >  <_> ) \    \_\  \  | \(  <_> )  |  /  |_> >  |   /   --   \  /_____/  /       \  \_/   \   |/       \
+ * |_______ \___  >___  / \____/   \______  /__|   \____/|____/|   __/   |___\______  /           \_______ \_____  /___/______  /
+ *         \/   \/_____/                  \/                   |__|                 \/                    \/     \/           \/
+ *
+ * Author:      Joel Wachsler
+ * Date:        2015-09-23
+ * Desc:        Lego group 18 robot program for "KTH DROID WARS 2015".
+ *              This program has a fully functioning AI.
+ *
+ * Disclaimer:  You are not allowed to use this program nor copy
+ *              parts of it for use in the "KTH DROID WARS 2015"
+ *              without the permission of all members of
+ *              Lego Group 18.
+ *
+ **/
+
+// Global speed definitions
+#define HIGH_SPEED 100
+#define MEDIUM_SPEED 50
+#define SLOW_SPEED 25
+#define US_ROTATION_SPEED 35
+
+// Define ways
+#define RIGHT 0
+#define LEFT 1
+#define FORWARD 2
+#define BACK 3
+
+#define MOVE 1
+#define ROTATE 0
+
+// Define priority
+#define PRIO_HIGH 2
+#define PRIO_MEDIUM 1
+#define PRIO_LOW 0
+
+// Define sensor threshold
+#define LIGHT_THRESHOLD 40
+#define US_THRESHOLD 110
+
+// Define motor inputs
+#define RIGHT_MOTOR OUT_A
+#define LEFT_MOTOR OUT_B
+#define BOTH_MOTORS OUT_AB
+#define US_MOTOR OUT_C
+
+struct MoveCommand
+{
+    // Each move command has an id
+    unsigned int id;
+    // Priority
+    unsigned short prio;
+    short rotateDegreesOrCentimeters;
+    // Which way to go
+    unsigned short way;
+    bool running;
+    // Rotate or move command?
+    // move = true
+    // rotate = false
+    bool moveOrRotate;
+};
+
+struct SonarValues
+{
+    unsigned short sonarValue;
+    unsigned short rotationCounter;
+    unsigned short targetRange;
+    short targetSpotDegree;
+    bool target;
+    bool resettingSonar;
+};
+
+struct GlobalVar
+{
+    MoveCommand commandRunning;
+    SonarValues sonarValues;
+    unsigned short idleTimer;
+    unsigned short sonarValue;
+};
+
+GlobalVar global;
+
+/* -------------------------------------------------- UTILS -------------------------------------------------- */
+
+bool randomBool()
+{
+    return Random(2) & 1;
+}
+
+MoveCommand command(unsigned short prio, bool moveOrRotate, short rotateDegreesOrCentimeters, unsigned short way)
+{
+    MoveCommand command;
+    command.running = true;
+    command.prio = prio;
+    command.rotateDegreesOrCentimeters = rotateDegreesOrCentimeters;
+    command.way = way;
+    command.moveOrRotate = moveOrRotate;
+
+    return command;
+}
+
+/* -------------------------------------------------- UTILS END -------------------------------------------------- */
+
+/* -------------------------------------------------- MOVEMENT -------------------------------------------------- */
+
+bool canIStillGo(MoveCommand command)
+{
+    // If the id passed to this function's not
+    // the same as the global one, return false
+    return command.id == global.commandRunning.id;
+}
+
+// Called when movement functions are finished
+void finished(MoveCommand command)
+{
+    // Other movement commands are now allowed!
+    if (canIStillGo(command))
+        global.commandRunning.running = false;
+
+    // Brake motors when stopping
+    OffEx(BOTH_MOTORS, RESET_ALL);
+}
+
+void go(MoveCommand command)
+{
+    // Converting
+    unsigned short degrees = 50/3 * command.rotateDegreesOrCentimeters;
+    // Save the current rotation
+    short startingRotation = MotorRotationCount(RIGHT_MOTOR);
+
+    switch(command.way)
+    {
+        case FORWARD:
+            // Start motor and sync them
+            OnFwdSync(BOTH_MOTORS, HIGH_SPEED, 0);
+            // Rotate until right rotation
+            until(MotorRotationCount(RIGHT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+            break;
+        case BACK:
+            OnFwdSync(BOTH_MOTORS, -HIGH_SPEED, 0);
+            until(MotorRotationCount(LEFT_MOTOR) < startingRotation - degrees || !canIStillGo(command));
+            break;
+        case LEFT:
+            // TODO: MAKE LEFT AND RIGHT GO IN A CIRCLE WITH
+            // A DIAMETER OF 20 CM
+            OnFwd(RIGHT_MOTOR, HIGH_SPEED);
+            OnFwd(LEFT_MOTOR, MEDIUM_SPEED);
+            until(MotorRotationCount(RIGHT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+            break;
+        case RIGHT:
+            OnFwd(RIGHT_MOTOR, MEDIUM_SPEED);
+            OnFwd(LEFT_MOTOR, HIGH_SPEED);
+            until(MotorRotationCount(LEFT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+            break;
+    }
+
+    finished(command);
+}
+
+void rotate(MoveCommand command)
+{
+    // One degree is only a half one when rotating
+    unsigned short degrees = command.rotateDegreesOrCentimeters;
+    // NXC SUCKS
+    degrees *= 2;
+
+    // Declare the current rotation
+    short startingRotation;
+
+    unsigned short rotationSpeed;
+    // What speed should we use?
+    if (command.rotateDegreesOrCentimeters < 20 && command.rotateDegreesOrCentimeters > -20)
+        rotationSpeed = SLOW_SPEED;
+    else if (command.rotateDegreesOrCentimeters < 90 && command.rotateDegreesOrCentimeters > -90)
+        rotationSpeed = MEDIUM_SPEED;
+    else
+        rotationSpeed = HIGH_SPEED;
+
+    // POSITIVE GO LEFT
+    // NEGATIVE GO RIGHT
+    if (command.rotateDegreesOrCentimeters > 0)
+    {
+        startingRotation = MotorRotationCount(RIGHT_MOTOR);
+        OnFwdSync(BOTH_MOTORS, rotationSpeed, -100);
+        // Rotate until right rotation
+        until(MotorRotationCount(RIGHT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+    }
+    else
+    {
+        startingRotation = MotorRotationCount(LEFT_MOTOR);
+        OnFwdSync(BOTH_MOTORS, rotationSpeed, 100);
+        // Rotate until right rotation
+        until(MotorRotationCount(LEFT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+    }
+
+    finished(command);
+}
+
+// Calculate which movement command can be
+// run in the current state
+void movementProcessor(MoveCommand command)
+{
+    // Reset idleTimer
+    global.idleTimer = 0;
+
+    // Assign this command an id
+    command.id = global.commandRunning.id + 1;
+
+    // Can this move command be ran?
+    if (!global.commandRunning.running
+            || command.prio >= global.commandRunning.prio)
+    {
+        global.commandRunning = command;
+
+        // Determine if this is a rotation or movement command
+        if (command.moveOrRotate)
+            go(command);
+        else
+            rotate(command);
+    }
+}
+
+/* -------------------------------------------------- MOVEMENT END -------------------------------------------------- */
+
+/* -------------------------------------------------- SONAR -------------------------------------------------- */
+
+task reset_sonar()
+{
+    // Only one reset_sonar can be run
+    if (!global.sonarValues.resettingSonar)
+    {
+        // Reset sonar rotation counter
+        global.sonarValues.rotationCounter = 1;
+        // Tell the rotation function it cannot use this function
+        global.sonarValues.resettingSonar = true;
+        // Reset sonar and set it to inital position
+        // while the robot is moving
+        while(global.commandRunning.running)
+        {
+            OnFwd(OUT_C, -HIGH_SPEED);
+            until(MotorRotationCount(US_MOTOR) < 5);
+
+            OnFwd(OUT_C, HIGH_SPEED);
+            until(MotorRotationCount(US_MOTOR) > 5);
+        }
+
+        global.sonarValues.resettingSonar = false;
+    }
+}
+
+task rotate_sonar()
+{
+    int rotate = global.sonarValues.rotationCounter * 40;
+
+    while (true)
+    {
+        // Wait until the reset's done
+        until(!global.sonarValues.resettingSonar);
+
+        // Calulcate turn with a maximum of 180 degrees
+        rotate = (global.sonarValues.rotationCounter * 40 >= 180) ? 180 : global.sonarValues.rotationCounter * 40;
+
+        // Random if we turn left or right
+        if (randomBool())
+        {
+            OnFwd(US_MOTOR, US_ROTATION_SPEED);
+            until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
+        }
+        else
+        {
+            OnFwd(OUT_C, -US_ROTATION_SPEED);
+            until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
+        }
+
+        // Update rotation counter
+        global.sonarValues.rotationCounter++;
+    }
+}
+
+task check_sonar_value()
+{
+    // The sonar can't detect in less than 150ms
+    SetSensorLowspeed(IN_4);
+
+    while(true)
+    {
+        // Don't overload the CPU!
+        Wait(150);
+        // Update sonar sensor value
+        global.sonarValues.targetRange = SensorUS(IN_4);
+
+        // Only detect values over the threshold
+        if (global.sonarValues.targetRange > US_THRESHOLD)
+        {
+            // We do not have a target :(
+            global.sonarValues.target = false;
+            continue;
+        }
+
+        // A target has been spotted!
+        global.sonarValues.target = true;
+        // At what degree is the target?
+        global.sonarValues.targetSpotDegree = MotorRotationCount(US_MOTOR);
+
+        // Reset sonar position
+        Precedes(reset_sonar);
+    }
+}
+
+/* -------------------------------------------------- SONAR END -------------------------------------------------- */
+
+/* -------------------------------------------------- BLACK_LINE -------------------------------------------------- */
+
+task check_black_line()
+{
+    // Set light sensor at port 3
+    SetSensorLight(IN_3);
+
+    // Constantly check the value of the light sensor
+    while (true)
+    {
+        // Don't overload the cpu!
+        Wait(50);
+
+        // Check light value
+        if (Sensor(IN_3) > LIGHT_THRESHOLD)
+            continue;
+
+        // Go back
+        movementProcessor(command(PRIO_HIGH, MOVE, 30, BACK));
+
+        // Rotate
+        movementProcessor(command(PRIO_HIGH, ROTATE, 180, 0));
+    }
+}
+
+/* -------------------------------------------------- BLACK_LINE END -------------------------------------------------- */
+
+/* -------------------------------------------------- MOVEMENT TASK -------------------------------------------------- */
+
+task movement()
+{
+    while(true)
+    {
+        // We need to find a target before doing anything
+        if (!global.sonarValues.target)
+            continue;
+
+        // Forward if the target is in a low number of degrees
+        if(global.sonarValues.targetSpotDegree > -5 && global.sonarValues.targetSpotDegree < 5)
+            movementProcessor(command(PRIO_LOW, MOVE, global.sonarValues.targetRange + 50, FORWARD));
+        else
+            movementProcessor(command(PRIO_LOW, MOVE, global.sonarValues.targetSpotDegree, 0));
+    }
+}
+
+/* -------------------------------------------------- MOVEMENT TASK END -------------------------------------------------- */
+
+/* -------------------------------------------------- TOUCH TASK -------------------------------------------------- */
+
+task touch_sensor()
+{
+    SetSensorTouch(IN_1);
+    SetSensorTouch(IN_2);
+
+    while(true)
+    {
+        // Go forwards if sensor 1 and two are pushed in
+        // Go left if sensor 1 is pushed in
+        // Go right if sensor 2 is pushed in
+        if (Sensor(IN_1) == true && Sensor(IN_2) == true)
+            movementProcessor(command(PRIO_MEDIUM, MOVE, 10, FORWARD));
+        else if(Sensor(IN_1) == true)
+            movementProcessor(command(PRIO_MEDIUM, MOVE, 10, LEFT));
+        else if(Sensor(IN_2) == true)
+            movementProcessor(command(PRIO_MEDIUM, MOVE, 10, RIGHT));
+    }
+}
+
+/* -------------------------------------------------- TOUCH TASK END -------------------------------------------------- */
+
+/* -------------------------------------------------- STRATERGY TASK -------------------------------------------------- */
+
+// Randomizes strategy so the other player can't
+// counter us by looking at a stratergy this robot
+// uses in a certain round
+task strategy()
+{
+    // By having the different strats in an array
+    // we can easily disable them
+    int strats[] = {
+        1
+        /*2,*/
+        /*3,*/
+        /*4,*/
+        /*5*/
+    };
+
+    // Pick a random strat from the array
+    switch(strats[Random(ArrayLen(strats))])
+    {
+        case 1:
+            // Rotate right and just push the other player
+            // out of the ring
+            movementProcessor(command(PRIO_LOW, ROTATE, 90, 0));
+            movementProcessor(command(PRIO_LOW, MOVE, 100, FORWARD));
+            break;
+        case 2:
+            // Go forwards right and then up, pushing the other
+            // robot from the back
+            movementProcessor(command(PRIO_LOW, MOVE, 100, FORWARD));
+            // TODO: Make 180 degrees right do an arc with a diameter
+            // of 20 cm
+            movementProcessor(command(PRIO_LOW, ROTATE, 180, 0));
+            movementProcessor(command(PRIO_LOW, MOVE, 50, FORWARD));
+            break;
+        case 4:
+            // Try to counter the other if they try strat#1
+            // Go backwards and then forwards pushing the
+            // other robot off the field
+            movementProcessor(command(PRIO_LOW, MOVE, 50, BACK));
+            break;
+        case 5:
+            // Rotate 360 degrees as fast a possible and
+            // try to find the other robot
+            movementProcessor(command(PRIO_LOW, ROTATE, 360, 0));
+            break;
+    }
+}
+
+/* -------------------------------------------------- STRATERGY TASK -------------------------------------------------- */
+
+/* -------------------------------------------------- STRATERGY TASK -------------------------------------------------- */
+
+task random_movement()
+{
+    // Random timer min and max time
+    unsigned short starting = 10000;
+    unsigned short ending = 25000;
+
+    // Min and max turnaround
+    unsigned short start_rotation = 30;
+    unsigned short end_rotation = 360;
+
+    // Min and max go forward
+    unsigned short start_forward = 5;
+    unsigned short end_forward = 20;
+
+    while (true)
+    {
+        // Do something random if standing still
+        // for a couple of seconds
+        if (global.idleTimer <= Random(ending-starting)+starting)
+        {
+            Wait(500);
+            global.idleTimer += 500;
+            continue;
+        }
+
+        // Randomizing movement when idle
+        if (randomBool())
+            movementProcessor(command(PRIO_LOW, ROTATE, Random(end_rotation-start_rotation)+start_rotation, 0));
+        else
+            movementProcessor(command(PRIO_LOW, MOVE, Random(end_forward-start_forward)+start_forward, FORWARD));
+    }
+}
+
+/* -------------------------------------------------- STRATERGY TASK END -------------------------------------------------- */
+
+task main()
+{
+    // Create a dummy MoveCommand so we don't get any errors
+    MoveCommand cmd;
+    cmd = command(PRIO_LOW, MOVE, 0, 0);
+    cmd.id = 0;
+    cmd.running = false;
+
+    // Dummy for sonar values
+    SonarValues sonarValues;
+    sonarValues.target = false;
+    sonarValues.targetRange = 5000;
+    sonarValues.resettingSonar = false;
+    sonarValues.rotationCounter = 1;
+    sonarValues.targetSpotDegree = 0;
+
+    // NXC STILL SUCKS
+    global.commandRunning = cmd;
+    global.sonarValues = sonarValues;
+    global.idleTimer = 0;
+
+    // Start threads
+    Precedes(
+            check_black_line,
+            rotate_sonar,
+            check_sonar_value,
+            movement,
+            random_movement
+            /*touch_sensor*/
+            );
+}

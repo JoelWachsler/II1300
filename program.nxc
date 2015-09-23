@@ -40,17 +40,14 @@
 #define THRESHOLD 40
 
 // Define sonar sensitivity range
-/*#define US_THRESHOLD 75*/
-#define US_THRESHOLD 30
-
-// Lock the motor to the task which acquire it
-mutex motorMutex;
+// 110cm is a fine range for searching but not while debugging
+#define US_THRESHOLD 110
 
 // Motor rotation counter for the sonar
 short motorRotation = 0;
 // The range of the ultrasonic sensor if it's
 // shorter than the defined range for US_THRESHOLD
-short sensorVal = 0;
+unsigned short sensorVal = 0;
 // Found the initial target
 bool target = false;
 // Checks how many turns the motor for the
@@ -63,6 +60,8 @@ bool total_sonar_lock = false;
 bool targetLock = false;
 // Idle timer
 unsigned short idleTimer = 0;
+// Lock all movement
+bool lock_movement = false;
 
 // TODO: PRIORITY CHECKING
 // make tasks with higher priority override
@@ -70,21 +69,26 @@ unsigned short idleTimer = 0;
 
 // Define all functions and task so they're
 // usable by all functions
-void rotate(bool direction, int deg);
-void go(short way, short centimeter);
+void rotate(bool direction, int deg, bool override);
+void go(short way, short centimeter, bool override);
 task check_line();
 task rotate_sonar();
 task sonar();
 task random_movement();
 task movement();
 task strategy();
-
+task touch_sensor();
 
 // Tell the robot to rotate
-void rotate(bool direction, int deg)
+void rotate(bool direction, int deg, bool override)
 {
     // Reset idletimer
     idleTimer = 0;
+
+    // Locks the robot from doing anything if
+    // this function is called without override being true
+    if (lock_movement && !override)
+        return;
 
     // Lock sonar when going and rotating
     total_sonar_lock = true;
@@ -121,10 +125,13 @@ void rotate(bool direction, int deg)
 }
 
 // Tell the robot to go in a certain way
-void go(short way,  short centimeter)
+void go(short way,  short centimeter, bool override)
 {
     // Reset idletimer
     idleTimer = 0;
+
+    if (lock_movement && !override)
+        return;
 
     // Converting
     int degrees = 50/3 * centimeter;
@@ -184,23 +191,15 @@ task check_line()
         if (Sensor(IN_3) > THRESHOLD)
             continue;
 
-        // Don't let other programs control the motor
-        Acquire(motorMutex);
-
-        // We need to find the target again after finishing
-        // this task
-        target = false;
-
-        // Go back a little bit before turning
-        go(BACK, 10);
-        // Random left or right
-        rotate((Random(2) & 1) ? LEFT : RIGHT, 180);
-
-        // Release the motor
-        Release(motorMutex);
-
+        // But this one works!!!!
         // This function is too slow!
-        /*RotateMotorEx(OUT_AB, HIGH_SPEED, -180, 0, true, true);*/
+        lock_movement = true;
+        go(BACK, 30, true);
+        rotate(LEFT, 180);
+        /*RotateMotorEx(OUT_AB, HIGH_SPEED, -600, 0, true, true);*/
+        /*RotateMotorEx(OUT_AB, HIGH_SPEED, ((Random(2) & 1) ? 720 : -720), -100, true, true);*/
+        /*RotateMotorEx(OUT_AB, HIGH_SPEED, 360, 0, true, true);*/
+        lock_movement = false;
         // If the other robot is not in the range of -120 and 120 degrees
         // turn either left or right
         /*if (motorRotation > -120 && motorRotation < 120)*/
@@ -228,8 +227,6 @@ inline void left_right_or_lock(int startingRotation, int rotate, bool left_right
 
 task rotate_sonar()
 {
-    Follows(strategy);
-
     // Reset motor position
     int startingRotation = MotorRotationCount(OUT_C);
     int rotate = sonarRotationCounter * 40;
@@ -304,9 +301,11 @@ task random_movement()
     unsigned short starting = 10000;
     unsigned short ending = 25000;
 
-    unsigned short start_rotation = 20;
-    unsigned short end_rotation = 180;
+    // Min and max turnaround
+    unsigned short start_rotation = 30;
+    unsigned short end_rotation = 360;
 
+    // Min and max go forward
     unsigned short start_forward = 5;
     unsigned short end_forward = 20;
 
@@ -324,9 +323,9 @@ task random_movement()
         // Randomizing movement when idle
 
         if (Random(2) & 1)
-            rotate((Random(2) & 1) ? LEFT : RIGHT, Random(end_rotation-start_rotation)+start_rotation);
+            rotate((Random(2) & 1) ? LEFT : RIGHT, Random(end_rotation-start_rotation)+start_rotation, false);
         else
-            go(FORWARD, Random(end_forward-start_forward)+start_forward);
+            go(FORWARD, Random(end_forward-start_forward)+start_forward, false);
     }
 }
 
@@ -341,15 +340,15 @@ task movement()
             continue;
 
         // Go forward if between -10 and 10 degrees
-        if(motorRotation > -25 && motorRotation < 25)
-            go(FORWARD, sensorVal + 10);
+        if(motorRotation > -50 && motorRotation < 50)
+            go(FORWARD, sensorVal + 10, false);
             // Rotate left if positive
         else if(motorRotation > 0)
             // Rotate right if negative
-            rotate(LEFT, motorRotation);
+            rotate(LEFT, motorRotation, false);
         else if(motorRotation < 0)
             // Number is negative, convert
-            rotate(RIGHT, abs(motorRotation));
+            rotate(RIGHT, abs(motorRotation), false);
 
         // A new target has to be found!
         target = false;
@@ -364,11 +363,11 @@ task strategy()
     // By having the different strats in an array
     // we can easily disable them
     int strats[] = {
-        1,
-        2,
-        3,
-        4,
-        5
+        1
+        /*2,*/
+        /*3,*/
+        /*4,*/
+        /*5*/
     };
 
     // Pick a random strat from the array
@@ -377,38 +376,57 @@ task strategy()
         case 1:
             // Rotate right and just push the other player
             // out of the ring
-            rotate(RIGHT, 90);
-            go(FORWARD, 50);
+            rotate(RIGHT, 90, false);
+            go(FORWARD, 100, false);
             break;
         case 2:
             // Go forwards right and then up, pushing the other
             // robot from the back
-            go(FORWARD, 20);
+            go(FORWARD, 20, false);
             // TODO: Make 180 degrees right do an arc with a diameter
             // of 20 cm
-            go(RIGHT, 180);
-            go(FORWARD, 50);
+            go(RIGHT, 180, false);
+            go(FORWARD, 50, false);
             break;
         case 3:
             // Go around the other robot so we position our front
             // to the other one's left side and push them
-            go(RIGHT, 90);
-            go(FORWARD, 30);
-            go(RIGHT, 90);
-            go(FORWARD, 50);
+            go(RIGHT, 90, false);
+            go(FORWARD, 30, false);
+            go(RIGHT, 90, false);
+            go(FORWARD, 50, false);
             break;
         case 4:
             // Try to counter the other if they try strat#1
             // Go backwards and then forwards pushing the
             // other robot off the field
-            go(BACK, 50);
-            go(FORWARD, 100);
+            go(BACK, 50, false);
+            go(FORWARD, 100, false);
             break;
         case 5:
             // Rotate 360 degrees as fast a possible and
             // try to find the other robot
-            rotate((Random(2) & 1) ? LEFT : RIGHT, 360);
+            rotate((Random(2) & 1) ? LEFT : RIGHT, 360, false);
             break;
+    }
+}
+
+task touch_sensor()
+{
+    SetSensorTouch(IN_1);
+    SetSensorTouch(IN_2);
+
+    while(true)
+    {
+        // Go forwards if sensor 1 and two are pushed in
+        // Go left if sensor 1 is pushed in
+        // Go right if sensor 2 is pushed in
+        if (Sensor(IN_1) == true && Sensor(IN_2) == true)
+            go(FORWARD, 5);
+        else if(Sensor(IN_1) == true)
+            go(LEFT, 5);
+        else if(Sensor(IN_2) == true)
+            go(RIGHT, 5);
     }
 }
 
@@ -416,11 +434,12 @@ task main()
 {
     // Start tasks
     Precedes(
-                /*strategy*/
+                /*strategy,*/
                 /*check_line,*/
-                sonar,
+                /*sonar,*/
                 /*rotate_sonar,*/
-                movement
+                /*movement,*/
                 /*random_movement*/
+                touch_sensor
             );
 }
