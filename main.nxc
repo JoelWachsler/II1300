@@ -40,11 +40,11 @@
 
 // Define sensor threshold
 #define LIGHT_THRESHOLD 40
-#define US_THRESHOLD 110
+#define US_THRESHOLD 50
 
 // Define motor inputs
-#define RIGHT_MOTOR OUT_A
-#define LEFT_MOTOR OUT_B
+#define RIGHT_MOTOR OUT_B
+#define LEFT_MOTOR OUT_A
 #define BOTH_MOTORS OUT_AB
 #define US_MOTOR OUT_C
 
@@ -70,6 +70,7 @@ struct SonarValues
     unsigned short rotationCounter;
     unsigned short targetRange;
     short targetSpotDegree;
+    short sonarMotorRotationValue;
     bool target;
     bool resettingSonar;
 };
@@ -119,10 +120,13 @@ void finished(MoveCommand command)
 {
     // Other movement commands are now allowed!
     if (canIStillGo(command))
+    {
         global.commandRunning.running = false;
+        global.commandRunning.prio = 0;
+    }
 
     // Brake motors when stopping
-    OffEx(BOTH_MOTORS, RESET_ALL);
+    Off(BOTH_MOTORS);
 }
 
 void go(MoveCommand command)
@@ -164,7 +168,7 @@ void go(MoveCommand command)
 void rotate(MoveCommand command)
 {
     // One degree is only a half one when rotating
-    unsigned short degrees = command.rotateDegreesOrCentimeters;
+    short degrees = command.rotateDegreesOrCentimeters;
     // NXC SUCKS
     degrees *= 2;
 
@@ -173,28 +177,27 @@ void rotate(MoveCommand command)
 
     unsigned short rotationSpeed;
     // What speed should we use?
-    if (command.rotateDegreesOrCentimeters < 20 && command.rotateDegreesOrCentimeters > -20)
+    if (command.rotateDegreesOrCentimeters < 30 && command.rotateDegreesOrCentimeters > -30)
         rotationSpeed = SLOW_SPEED;
-    else if (command.rotateDegreesOrCentimeters < 90 && command.rotateDegreesOrCentimeters > -90)
+    else if (command.rotateDegreesOrCentimeters < 60 && command.rotateDegreesOrCentimeters > -60)
         rotationSpeed = MEDIUM_SPEED;
     else
         rotationSpeed = HIGH_SPEED;
 
-    // POSITIVE GO LEFT
-    // NEGATIVE GO RIGHT
+
     if (command.rotateDegreesOrCentimeters > 0)
     {
         startingRotation = MotorRotationCount(RIGHT_MOTOR);
         OnFwdSync(BOTH_MOTORS, rotationSpeed, -100);
-        // Rotate until right rotation
-        until(MotorRotationCount(RIGHT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+        // Rotate until correct rotation
+        until(MotorRotationCount(LEFT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
     }
     else
     {
         startingRotation = MotorRotationCount(LEFT_MOTOR);
         OnFwdSync(BOTH_MOTORS, rotationSpeed, 100);
-        // Rotate until right rotation
-        until(MotorRotationCount(LEFT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+        // Rotate until correct rotation
+        until(MotorRotationCount(LEFT_MOTOR) < startingRotation + degrees || !canIStillGo(command));
     }
 
     finished(command);
@@ -211,70 +214,73 @@ void movementProcessor(MoveCommand command)
     command.id = global.commandRunning.id + 1;
 
     // Can this move command be ran?
-    if (!global.commandRunning.running
-            || command.prio >= global.commandRunning.prio)
-    {
-        global.commandRunning = command;
+    if (global.commandRunning.running && command.prio <= global.commandRunning.prio)
+        return;
 
-        // Determine if this is a rotation or movement command
-        if (command.moveOrRotate)
-            go(command);
-        else
-            rotate(command);
-    }
+    global.commandRunning = command;
+
+    // Determine if this is a rotation or movement command
+    if (command.moveOrRotate)
+        go(command);
+    else
+        rotate(command);
 }
 
 /* -------------------------------------------------- MOVEMENT END -------------------------------------------------- */
 
 /* -------------------------------------------------- SONAR -------------------------------------------------- */
 
-task reset_sonar()
-{
-    // Only one reset_sonar can be run
-    if (!global.sonarValues.resettingSonar)
-    {
-        // Reset sonar rotation counter
-        global.sonarValues.rotationCounter = 1;
-        // Tell the rotation function it cannot use this function
-        global.sonarValues.resettingSonar = true;
-        // Reset sonar and set it to inital position
-        // while the robot is moving
-        while(global.commandRunning.running)
-        {
-            OnFwd(OUT_C, -HIGH_SPEED);
-            until(MotorRotationCount(US_MOTOR) < 5);
-
-            OnFwd(OUT_C, HIGH_SPEED);
-            until(MotorRotationCount(US_MOTOR) > 5);
-        }
-
-        global.sonarValues.resettingSonar = false;
-    }
-}
-
 task rotate_sonar()
 {
-    int rotate = global.sonarValues.rotationCounter * 40;
+    unsigned short increment = 50;
+    int rotate = global.sonarValues.rotationCounter * increment;
 
     while (true)
     {
-        // Wait until the reset's done
-        until(!global.sonarValues.resettingSonar);
-
         // Calulcate turn with a maximum of 180 degrees
-        rotate = (global.sonarValues.rotationCounter * 40 >= 180) ? 180 : global.sonarValues.rotationCounter * 40;
+        rotate = (global.sonarValues.rotationCounter * increment >= 180) ? 180 : global.sonarValues.rotationCounter * increment;
 
-        // Random if we turn left or right
-        if (randomBool())
+        if (global.sonarValues.resettingSonar || global.commandRunning.running && global.commandRunning.moveOrRotate == MOVE)
         {
-            OnFwd(US_MOTOR, US_ROTATION_SPEED);
-            until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
+            // Let's reset the sonar
+            global.sonarValues.rotationCounter = 0;
+
+            OnFwd(US_MOTOR, HIGH_SPEED);
+            until(MotorRotationCount(US_MOTOR) > 5);
+            Off(US_MOTOR);
+
+            OnFwd(US_MOTOR, -HIGH_SPEED);
+            until(MotorRotationCount(US_MOTOR) < -5);
+            Off(US_MOTOR);
+
+            global.sonarValues.resettingSonar = false;
         }
         else
         {
-            OnFwd(OUT_C, -US_ROTATION_SPEED);
-            until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
+            // Random if we turn left or right
+            if (randomBool())
+            {
+                OnFwd(US_MOTOR, US_ROTATION_SPEED);
+                until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
+                Off(US_MOTOR);
+
+                OnFwd(US_MOTOR, -US_ROTATION_SPEED);
+                until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
+                Off(US_MOTOR);
+            }
+            else
+            {
+                OnFwd(US_MOTOR, -US_ROTATION_SPEED);
+                until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
+                Off(US_MOTOR);
+
+                OnFwd(US_MOTOR, US_ROTATION_SPEED);
+                until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
+                Off(US_MOTOR);
+            }
         }
+
+        Off(US_MOTOR);
 
         // Update rotation counter
         global.sonarValues.rotationCounter++;
@@ -304,10 +310,8 @@ task check_sonar_value()
         // A target has been spotted!
         global.sonarValues.target = true;
         // At what degree is the target?
-        global.sonarValues.targetSpotDegree = MotorRotationCount(US_MOTOR);
-
-        // Reset sonar position
-        Precedes(reset_sonar);
+        global.sonarValues.targetSpotDegree = -MotorRotationCount(US_MOTOR);
+        global.sonarValues.resettingSonar = true;
     }
 }
 
@@ -331,7 +335,7 @@ task check_black_line()
             continue;
 
         // Go back
-        movementProcessor(command(PRIO_HIGH, MOVE, 30, BACK));
+        movementProcessor(command(PRIO_HIGH, MOVE, 40, BACK));
 
         // Rotate
         movementProcessor(command(PRIO_HIGH, ROTATE, 180, 0));
@@ -351,10 +355,10 @@ task movement()
             continue;
 
         // Forward if the target is in a low number of degrees
-        if(global.sonarValues.targetSpotDegree > -5 && global.sonarValues.targetSpotDegree < 5)
-            movementProcessor(command(PRIO_LOW, MOVE, global.sonarValues.targetRange + 50, FORWARD));
+        if(global.sonarValues.targetSpotDegree > -15 && global.sonarValues.targetSpotDegree < 15)
+            movementProcessor(command(PRIO_LOW, MOVE, global.sonarValues.targetRange + 20, FORWARD));
         else
-            movementProcessor(command(PRIO_LOW, MOVE, global.sonarValues.targetSpotDegree, 0));
+            movementProcessor(command(PRIO_LOW, ROTATE, global.sonarValues.targetSpotDegree, 0));
     }
 }
 
@@ -372,12 +376,12 @@ task touch_sensor()
         // Go forwards if sensor 1 and two are pushed in
         // Go left if sensor 1 is pushed in
         // Go right if sensor 2 is pushed in
-        if (Sensor(IN_1) == true && Sensor(IN_2) == true)
-            movementProcessor(command(PRIO_MEDIUM, MOVE, 10, FORWARD));
-        else if(Sensor(IN_1) == true)
-            movementProcessor(command(PRIO_MEDIUM, MOVE, 10, LEFT));
-        else if(Sensor(IN_2) == true)
-            movementProcessor(command(PRIO_MEDIUM, MOVE, 10, RIGHT));
+        if (Sensor(IN_1) && Sensor(IN_2))
+            movementProcessor(command(PRIO_MEDIUM, MOVE, 30, FORWARD));
+        else if(Sensor(IN_1))
+            movementProcessor(command(PRIO_MEDIUM, MOVE, 30, LEFT));
+        else if(Sensor(IN_2))
+            movementProcessor(command(PRIO_MEDIUM, MOVE, 30, RIGHT));
     }
 }
 
@@ -471,6 +475,18 @@ task random_movement()
 
 /* -------------------------------------------------- STRATERGY TASK END -------------------------------------------------- */
 
+task debug()
+{
+    while (true)
+    {
+        ClearScreen();
+        NumOut(0, 0, global.commandRunning.prio);
+        /*NumOut(0, 10, global.commandRunning.running);*/
+
+        Wait(100);
+    }
+}
+
 task main()
 {
     // Create a dummy MoveCommand so we don't get any errors
@@ -494,11 +510,12 @@ task main()
 
     // Start threads
     Precedes(
-            check_black_line,
+            /*check_black_line,*/
             rotate_sonar,
             check_sonar_value,
             movement,
-            random_movement
-            /*touch_sensor*/
-            );
+            /*random_movement,*/
+            touch_sensor,
+            debug
+        );
 }
