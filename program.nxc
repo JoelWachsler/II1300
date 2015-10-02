@@ -41,7 +41,7 @@
 
 // Define sonar sensitivity range
 // 110cm is a fine range for searching but not while debugging
-#define US_THRESHOLD 110
+#define US_THRESHOLD 50
 
 // Motor rotation counter for the sonar
 short motorRotation = 0;
@@ -193,21 +193,8 @@ task check_line()
 
         // But this one works!!!!
         // This function is too slow!
-        lock_movement = true;
-        go(BACK, 30, true);
-        rotate(LEFT, 180);
-        /*RotateMotorEx(OUT_AB, HIGH_SPEED, -600, 0, true, true);*/
-        /*RotateMotorEx(OUT_AB, HIGH_SPEED, ((Random(2) & 1) ? 720 : -720), -100, true, true);*/
-        /*RotateMotorEx(OUT_AB, HIGH_SPEED, 360, 0, true, true);*/
-        lock_movement = false;
-        // If the other robot is not in the range of -120 and 120 degrees
-        // turn either left or right
-        /*if (motorRotation > -120 && motorRotation < 120)*/
-            /*// Random if turning left or right*/
-            /*RotateMotorEx(OUT_AB, ((Random(2) & 0 ) ? -1 : 1)*HIGH_SPEED, 460, -100, true, true);*/
-        /*else*/
-            /*// Turn to the direction the other robot is*/
-            /*RotateMotorEx(OUT_AB, HIGH_SPEED, (460/360)*motorRotation, -100, true, true);*/
+        RotateMotorEx(OUT_AB, HIGH_SPEED, -600, 0, true, true);
+        RotateMotorEx(OUT_AB, HIGH_SPEED, 360, 100, true, true);
     }
 }
 
@@ -355,62 +342,6 @@ task movement()
     }
 }
 
-// Randomizes strategy so the other player can't
-// counter us by looking at a stratergy this robot
-// uses in a certain round
-task strategy()
-{
-    // By having the different strats in an array
-    // we can easily disable them
-    int strats[] = {
-        1
-        /*2,*/
-        /*3,*/
-        /*4,*/
-        /*5*/
-    };
-
-    // Pick a random strat from the array
-    switch(strats[Random(ArrayLen(strats))])
-    {
-        case 1:
-            // Rotate right and just push the other player
-            // out of the ring
-            rotate(RIGHT, 90, false);
-            go(FORWARD, 100, false);
-            break;
-        case 2:
-            // Go forwards right and then up, pushing the other
-            // robot from the back
-            go(FORWARD, 20, false);
-            // TODO: Make 180 degrees right do an arc with a diameter
-            // of 20 cm
-            go(RIGHT, 180, false);
-            go(FORWARD, 50, false);
-            break;
-        case 3:
-            // Go around the other robot so we position our front
-            // to the other one's left side and push them
-            go(RIGHT, 90, false);
-            go(FORWARD, 30, false);
-            go(RIGHT, 90, false);
-            go(FORWARD, 50, false);
-            break;
-        case 4:
-            // Try to counter the other if they try strat#1
-            // Go backwards and then forwards pushing the
-            // other robot off the field
-            go(BACK, 50, false);
-            go(FORWARD, 100, false);
-            break;
-        case 5:
-            // Rotate 360 degrees as fast a possible and
-            // try to find the other robot
-            rotate((Random(2) & 1) ? LEFT : RIGHT, 360, false);
-            break;
-    }
-}
-
 task touch_sensor()
 {
     SetSensorTouch(IN_1);
@@ -421,12 +352,18 @@ task touch_sensor()
         // Go forwards if sensor 1 and two are pushed in
         // Go left if sensor 1 is pushed in
         // Go right if sensor 2 is pushed in
-        if (Sensor(IN_1) == true && Sensor(IN_2) == true)
-            go(FORWARD, 5);
-        else if(Sensor(IN_1) == true)
-            go(LEFT, 5);
-        else if(Sensor(IN_2) == true)
-            go(RIGHT, 5);
+        if (Sensor(IN_1) && Sensor(IN_2))
+        {
+            go(FORWARD, 30, true);
+        }
+        else if(Sensor(IN_1))
+        {
+            go(LEFT, 30, true);
+        }
+        else if(Sensor(IN_2))
+        {
+            go(RIGHT, 30, true);
+        }
     }
 }
 
@@ -436,9 +373,9 @@ task main()
     Precedes(
                 /*strategy,*/
                 /*check_line,*/
-                /*sonar,*/
-                /*rotate_sonar,*/
-                /*movement,*/
+                sonar,
+                rotate_sonar,
+                movement,
                 /*random_movement*/
                 touch_sensor
             );

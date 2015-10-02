@@ -80,7 +80,6 @@ struct GlobalVar
     MoveCommand commandRunning;
     SonarValues sonarValues;
     unsigned short idleTimer;
-    unsigned short sonarValue;
 };
 
 GlobalVar global;
@@ -123,10 +122,10 @@ void finished(MoveCommand command)
     {
         global.commandRunning.running = false;
         global.commandRunning.prio = 0;
+        // Brake motors when stopping
+        Off(BOTH_MOTORS);
     }
 
-    // Brake motors when stopping
-    Off(BOTH_MOTORS);
 }
 
 void go(MoveCommand command)
@@ -177,20 +176,25 @@ void rotate(MoveCommand command)
 
     unsigned short rotationSpeed;
     // What speed should we use?
-    if (command.rotateDegreesOrCentimeters < 30 && command.rotateDegreesOrCentimeters > -30)
+    if (command.rotateDegreesOrCentimeters <= 30 && command.rotateDegreesOrCentimeters >= -30)
         rotationSpeed = SLOW_SPEED;
-    else if (command.rotateDegreesOrCentimeters < 60 && command.rotateDegreesOrCentimeters > -60)
+    else if (command.rotateDegreesOrCentimeters <= 60 && command.rotateDegreesOrCentimeters >= -60)
         rotationSpeed = MEDIUM_SPEED;
     else
         rotationSpeed = HIGH_SPEED;
 
+    ClearScreen();
+    NumOut(0,0,command.rotateDegreesOrCentimeters);
+    NumOut(0,10,MotorRotationCount(RIGHT_MOTOR));
+    NumOut(0,20,degrees);
+    /*Wait(10000);*/
 
-    if (command.rotateDegreesOrCentimeters > 0)
+    if (command.rotateDegreesOrCentimeters >= 0)
     {
         startingRotation = MotorRotationCount(RIGHT_MOTOR);
         OnFwdSync(BOTH_MOTORS, rotationSpeed, -100);
         // Rotate until correct rotation
-        until(MotorRotationCount(LEFT_MOTOR) > startingRotation + degrees || !canIStillGo(command));
+        until(MotorRotationCount(RIGHT_MOTOR) < startingRotation - degrees || !canIStillGo(command));
     }
     else
     {
@@ -238,46 +242,41 @@ task rotate_sonar()
     while (true)
     {
         // Calulcate turn with a maximum of 180 degrees
-        rotate = (global.sonarValues.rotationCounter * increment >= 180) ? 180 : global.sonarValues.rotationCounter * increment;
+        rotate = global.sonarValues.rotationCounter * increment;
+        if (rotate >= 180)
+        {
+            rotate = 180;
+            global.sonarValues.rotationCounter = 10;
+        }
 
-        if (global.sonarValues.resettingSonar || global.commandRunning.running && global.commandRunning.moveOrRotate == MOVE)
+        if (global.sonarValues.resettingSonar || global.commandRunning.running)
         {
             // Let's reset the sonar
             global.sonarValues.rotationCounter = 0;
 
-            OnFwd(US_MOTOR, HIGH_SPEED);
-            until(MotorRotationCount(US_MOTOR) > 5);
-            Off(US_MOTOR);
+            if (MotorRotationCount(US_MOTOR) < 0)
+            {
+                OnFwd(US_MOTOR, HIGH_SPEED);
+                until(MotorRotationCount(US_MOTOR) > 0);
+            }
+            else if (MotorRotationCount(US_MOTOR))
+            {
+                OnFwd(US_MOTOR, -HIGH_SPEED);
+                until(MotorRotationCount(US_MOTOR) < 0);
+            }
 
-            OnFwd(US_MOTOR, -HIGH_SPEED);
-            until(MotorRotationCount(US_MOTOR) < -5);
-            Off(US_MOTOR);
-
-            global.sonarValues.resettingSonar = false;
+            if (!global.commandRunning.running)
+                global.sonarValues.resettingSonar = false;
         }
         else
         {
-            // Random if we turn left or right
-            if (randomBool())
-            {
-                OnFwd(US_MOTOR, US_ROTATION_SPEED);
-                until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
-                Off(US_MOTOR);
 
-                OnFwd(US_MOTOR, -US_ROTATION_SPEED);
-                until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
-                Off(US_MOTOR);
-            }
-            else
-            {
-                OnFwd(US_MOTOR, -US_ROTATION_SPEED);
-                until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
-                Off(US_MOTOR);
+            OnFwd(US_MOTOR, US_ROTATION_SPEED);
+            until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
 
-                OnFwd(US_MOTOR, US_ROTATION_SPEED);
-                until(MotorRotationCount(US_MOTOR) > rotate || global.sonarValues.resettingSonar);
-                Off(US_MOTOR);
-            }
+            OnFwd(US_MOTOR, -US_ROTATION_SPEED);
+            until(MotorRotationCount(US_MOTOR) < -rotate || global.sonarValues.resettingSonar);
+
         }
 
         Off(US_MOTOR);
@@ -475,18 +474,6 @@ task random_movement()
 
 /* -------------------------------------------------- STRATERGY TASK END -------------------------------------------------- */
 
-task debug()
-{
-    while (true)
-    {
-        ClearScreen();
-        NumOut(0, 0, global.commandRunning.prio);
-        /*NumOut(0, 10, global.commandRunning.running);*/
-
-        Wait(100);
-    }
-}
-
 task main()
 {
     // Create a dummy MoveCommand so we don't get any errors
@@ -515,7 +502,6 @@ task main()
             check_sonar_value,
             movement,
             /*random_movement,*/
-            touch_sensor,
-            debug
+            touch_sensor
         );
 }
