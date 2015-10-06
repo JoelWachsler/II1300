@@ -40,8 +40,8 @@
 #define PRIO_LOW 0
 
 // Define sensor threshold
-#define LIGHT_THRESHOLD 40
-#define US_THRESHOLD 30
+#define LIGHT_THRESHOLD 35
+#define US_THRESHOLD 80
 
 // Define motor inputs
 #define RIGHT_MOTOR OUT_B
@@ -171,7 +171,7 @@ task rotate()
     // One degree is only a half one when rotating
     short degrees = global.commandRunning.rotateDegreesOrCentimeters;
     // NXC SUCKS
-    degrees *= 2;
+    degrees *= 3.0;
 
     // Declare the current rotation
     short startingRotation;
@@ -344,6 +344,9 @@ task check_sonar_value()
         }
         spotDeg = MotorRotationCount(US_MOTOR);
 
+        ClearScreen();
+        NumOut(0,0,spotVal);
+
         // Update sonar sensor value
         global.sonarValues.targetRange = spotVal;
 
@@ -351,11 +354,16 @@ task check_sonar_value()
         global.sonarValues.target = true;
         Wait(100);
 
-        if(spotDeg < 10 && spotDeg > -10)
+        if(spotDeg < 15 && spotDeg > -15)
             movementProcessor(command(PRIO_LOW, MOVE, spotVal + 10, FORWARD));
         else
         {
             // Rotate and go in that direction
+            if (spotDeg > 0)
+                spotDeg += 20;
+            else
+                spotDeg -= 20;
+
             movementProcessor(command(PRIO_LOW, ROTATE, -spotDeg, 0));
             until(!global.commandRunning.running);
             movementProcessor(command(PRIO_MEDIUM, MOVE, spotVal, FORWARD));
@@ -378,18 +386,20 @@ task check_black_line()
     while (true)
     {
         // Don't overload the cpu!
-        Wait(50);
+        /*Wait(50);*/
 
         // Check light value
         if (Sensor(LIGHT_SENSOR) > LIGHT_THRESHOLD)
             continue;
 
         // Go back
-        movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 40, BACK));
+        movementProcessor(command(PRIO_HIGH, MOVE, 50, BACK));
+        Wait(500);
 
         // Rotate after task before completed
+        /*until(!global.commandRunning.running);*/
+        movementProcessor(command(PRIO_HIGH, ROTATE, (randomBool() ? 90 : -90), 0));
         until(!global.commandRunning.running);
-        movementProcessor(command(PRIO_SUPER_HIGH, ROTATE, 180, 0));
     }
 }
 
@@ -408,7 +418,7 @@ task touch_sensor()
         // Go left if sensor 1 is pushed in
         // Go right if sensor 2 is pushed in
         if (Sensor(TOUCH_LEFT) && Sensor(TOUCH_RIGHT))
-            movementProcessor(command(PRIO_HIGH, MOVE, 30, FORWARD));
+            movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 30, FORWARD));
         else if(Sensor(TOUCH_LEFT))
             movementProcessor(command(PRIO_MEDIUM, MOVE, 30, LEFT));
         else if(Sensor(TOUCH_RIGHT))
@@ -419,31 +429,6 @@ task touch_sensor()
 }
 
 /* -------------------------------------------------- TOUCH TASK END -------------------------------------------------- */
-
-task debug()
-{
-    while(true)
-    {
-        ClearScreen();
-
-        TextOut(0,8,"Range:");
-        NumOut(50,8,global.sonarValues.targetRange);
-
-        TextOut(0,8*2,"US ROT:");
-        NumOut(50,8*2,MotorRotationCount(US_MOTOR));
-
-        TextOut(0,8*3,"Running:");
-        NumOut(50,8*3,global.commandRunning.running);
-
-        Wait(100);
-    }
-}
-
-safecall void playSound()
-{
-    PlayTone(TONE_C4, MS_500);
-    Wait(SEC_1);
-}
 
 task main()
 {
@@ -456,14 +441,17 @@ task main()
     global.commandRunning = commandDefault();
     global.sonarValues = sonarValues;
 
-    /*playSound();*/
 
+    /*movementProcessor(command(PRIO_MEDIUM, MOVE, 10, FORWARD));*/
+    /*until(!global.commandRunning.running);*/
+    /*movementProcessor(command(PRIO_LOW, ROTATE, -180, 0));*/
+    Wait(5000);
+    movementProcessor(command(PRIO_LOW, ROTATE, 90, 0));
     // Start threads
     Precedes(
-            /*check_black_line,*/
+            check_black_line,
             check_sonar_value,
             rotate_sonar,
-            touch_sensor,
-            debug
+            touch_sensor
         );
 }
