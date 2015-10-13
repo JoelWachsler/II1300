@@ -363,11 +363,11 @@ task check_sonar_value()
         Wait(100);
 
         // Death grip fix
-        if(spotDeg < 10 && spotDeg > -10)
+        if(spotDeg < 15 && spotDeg > -15)
         {
             movementProcessor(command(PRIO_LOW, MOVE, spotVal + 10, FORWARD));
         }
-        else if (spotDeg > -90 && spotDeg < 90 && spotVal =< 20)
+        else if (spotDeg > -90 && spotDeg < 90 && spotVal <= 20)
         {
             if (spotDeg >= 0)
                 movementProcessor(command(PRIO_MEDIUM, MOVE, 50, LEFT));
@@ -470,6 +470,7 @@ task main()
     /*movementProcessor(command(PRIO_LOW, ROTATE, 90, 0));*/
 
     movementProcessor(command(PRIO_LOW, MOVE, 15, BACK));
+    until(!global.commandRunning.running);
 
     // Start threads
     Precedes(
