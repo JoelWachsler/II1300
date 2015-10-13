@@ -50,15 +50,14 @@
 #define US_MOTOR OUT_C
 
 #define US IN_1
-#define LIGHT_SENSOR IN_3
 #define TOUCH_LEFT IN_2
+#define LIGHT_SENSOR IN_3
 #define TOUCH_RIGHT IN_4
 
 // Declare functions for usage before they're declared
 task mov_finished();
 task rotate_sonar();
-
-mutex finished_mutex;
+task touch_sensor();
 
 struct MoveCommand
 {
@@ -91,9 +90,14 @@ GlobalVar global;
 
 /* -------------------------------------------------- UTILS -------------------------------------------------- */
 
+unsigned int random_between(unsigned int starting, unsigned int ending)
+{
+    return Random((ending+1)-starting)+starting; // starting..ending
+}
+
 bool randomBool()
 {
-    return Random(2) & 1;
+    return random_between(0, 1);
 }
 
 MoveCommand command(unsigned short prio, bool moveOrRotate, short rotateDegreesOrCentimeters, unsigned short way)
@@ -128,7 +132,7 @@ MoveCommand commandDefault()
 task go()
 {
     // Converting
-    unsigned short degrees = 50/3 * global.commandRunning.rotateDegreesOrCentimeters;
+    unsigned short degrees = 55/3 * global.commandRunning.rotateDegreesOrCentimeters;
     // Save the current rotation
     short startingRotation = MotorRotationCount(RIGHT_MOTOR);
 
@@ -138,25 +142,33 @@ task go()
         switch(global.commandRunning.way)
         {
             case FORWARD:
+                startingRotation = MotorRotationCount(RIGHT_MOTOR);
+
                 // Start motor and sync them
                 OnFwdSync(BOTH_MOTORS, HIGH_SPEED, 0);
                 // Rotate until right rotation
                 until(MotorRotationCount(RIGHT_MOTOR) > startingRotation + degrees);
                 break;
             case BACK:
+                startingRotation = MotorRotationCount(LEFT_MOTOR);
+
                 OnFwdSync(BOTH_MOTORS, -HIGH_SPEED, 0);
                 until(MotorRotationCount(LEFT_MOTOR) < startingRotation - degrees);
                 break;
             case LEFT:
                 // TODO: MAKE LEFT AND RIGHT GO IN A CIRCLE WITH
                 // A DIAMETER OF 20 CM
+                startingRotation = MotorRotationCount(RIGHT_MOTOR);
+
                 OnFwd(RIGHT_MOTOR, HIGH_SPEED);
-                OnFwd(LEFT_MOTOR, MEDIUM_SPEED);
+                OnFwd(LEFT_MOTOR, SLOW_SPEED);
                 until(MotorRotationCount(RIGHT_MOTOR) > startingRotation + degrees);
                 break;
             case RIGHT:
-                OnFwd(RIGHT_MOTOR, MEDIUM_SPEED);
+                startingRotation = MotorRotationCount(LEFT_MOTOR);
+
                 OnFwd(LEFT_MOTOR, HIGH_SPEED);
+                OnFwd(RIGHT_MOTOR, SLOW_SPEED);
                 until(MotorRotationCount(LEFT_MOTOR) > startingRotation + degrees);
                 break;
         }
@@ -168,7 +180,7 @@ task go()
 
 task rotate()
 {
-    // One degree is only a half one when rotating
+    // One degree is only one third one when rotating
     short degrees = global.commandRunning.rotateDegreesOrCentimeters;
     // NXC SUCKS
     degrees *= 3.0;
@@ -219,7 +231,6 @@ task mov_finished()
 
     // Reset global movement
     global.commandRunning = commandDefault();
-
 }
 
 // Calculate which movement command can be
@@ -230,11 +241,13 @@ void movementProcessor(MoveCommand command)
     if (command.prio < global.commandRunning.prio)
         return;
 
-    global.commandRunning = command;
-
     // Stop all movement tasks
     StopTask(go);
     StopTask(rotate);
+
+    // Update the global commandrunning when tasks are fully stopped
+    global.commandRunning = commandDefault();
+    global.commandRunning = command;
 
     // Determine if this is a rotation or movement command
     if (command.moveOrRotate)
@@ -252,6 +265,7 @@ task rotate_sonar()
     unsigned short increment = 45;
     unsigned short rotationCounter = 1;
     int rotate;
+    bool firstRot = true;
 
     short speed;
 
@@ -260,6 +274,7 @@ task rotate_sonar()
         if (global.commandRunning.running)
         {
             rotationCounter = 1;
+            firstRot = true;
 
             // What speed should we use?
             if (MotorRotationCount(US_MOTOR) > 90 || MotorRotationCount(US_MOTOR) < -90)
@@ -285,12 +300,8 @@ task rotate_sonar()
         }
         else
         {
-            rotate = increment * rotationCounter;
-            if (rotate >= 180)
-            {
-                rotate = 180;
-                rotationCounter = 10;
-            }
+            rotate = firstRot ? 45 : 180;
+            firstRot = false;
 
             if (randomBool())
             {
@@ -344,9 +355,6 @@ task check_sonar_value()
         }
         spotDeg = MotorRotationCount(US_MOTOR);
 
-        ClearScreen();
-        NumOut(0,0,spotVal);
-
         // Update sonar sensor value
         global.sonarValues.targetRange = spotVal;
 
@@ -354,19 +362,24 @@ task check_sonar_value()
         global.sonarValues.target = true;
         Wait(100);
 
+        // Death grip fix
         if(spotDeg < 15 && spotDeg > -15)
+        {
             movementProcessor(command(PRIO_LOW, MOVE, spotVal + 10, FORWARD));
+        }
+        else if (spotDeg > -90 && spotDeg < 90 && spotVal =< 20)
+        {
+            if (spotDeg >= 0)
+                movementProcessor(command(PRIO_MEDIUM, MOVE, 50, LEFT));
+            else
+                movementProcessor(command(PRIO_MEDIUM, MOVE, 50, RIGHT));
+        }
         else
         {
             // Rotate and go in that direction
-            if (spotDeg > 0)
-                spotDeg += 20;
-            else
-                spotDeg -= 20;
-
             movementProcessor(command(PRIO_LOW, ROTATE, -spotDeg, 0));
-            until(!global.commandRunning.running);
-            movementProcessor(command(PRIO_MEDIUM, MOVE, spotVal, FORWARD));
+            /*until(!global.commandRunning.running);*/
+            /*movementProcessor(command(PRIO_MEDIUM, MOVE, spotVal, FORWARD));*/
         }
 
         Wait(100);
@@ -386,21 +399,24 @@ task check_black_line()
     while (true)
     {
         // Don't overload the cpu!
-        /*Wait(50);*/
+        Wait(50);
 
         // Check light value
         if (Sensor(LIGHT_SENSOR) > LIGHT_THRESHOLD)
             continue;
 
+        StopTask(touch_sensor);
+
         // Go back
-        movementProcessor(command(PRIO_HIGH, MOVE, 50, BACK));
-        Wait(500);
+        movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 30, BACK));
 
         // Rotate after task before completed
-        /*until(!global.commandRunning.running);*/
-        movementProcessor(command(PRIO_HIGH, ROTATE, (randomBool() ? 90 : -90), 0));
-        until(!global.commandRunning.running);
+        until(!global.commandRunning.running || global.commandRunning.way != BACK);
+        movementProcessor(command(PRIO_LOW, ROTATE, (randomBool() ? random_between(70, 180) : -random_between(70, 180)), 0));
+
+        StartTask(touch_sensor);
     }
+
 }
 
 /* -------------------------------------------------- BLACK_LINE END -------------------------------------------------- */
@@ -411,18 +427,44 @@ task touch_sensor()
 {
     SetSensorTouch(TOUCH_LEFT);
     SetSensorTouch(TOUCH_RIGHT);
+    /*SetSensorLight(LIGHT_SENSOR);*/
 
     while(true)
     {
+        // Check light value
+        /*if (Sensor(LIGHT_SENSOR) < LIGHT_THRESHOLD)*/
+        /*{*/
+            /*// Go back*/
+            /*movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 1, BACK));*/
+
+            /*// Rotate after task before completed*/
+            /*until(!global.commandRunning.running || global.commandRunning.way != BACK);*/
+            /*movementProcessor(command(PRIO_HIGH, ROTATE, (randomBool() ? random_between(70, 180) : -random_between(70, 180)), 0));*/
+        /*}*/
+
         // Go forwards if sensor 1 and two are pushed in
         // Go left if sensor 1 is pushed in
         // Go right if sensor 2 is pushed in
         if (Sensor(TOUCH_LEFT) && Sensor(TOUCH_RIGHT))
-            movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 30, FORWARD));
+        {
+            /*if (global.commandRunning.running && global.commandRunning.prio != PRIO_SUPER_HIGH)*/
+            /*{*/
+                /*StopTask(go);*/
+                /*StopTask(rotate);*/
+            /*}*/
+            movementProcessor(command(PRIO_HIGH, MOVE, 30, FORWARD));
+            Wait(200);
+        }
         else if(Sensor(TOUCH_LEFT))
+        {
             movementProcessor(command(PRIO_MEDIUM, MOVE, 30, LEFT));
+            Wait(200);
+        }
         else if(Sensor(TOUCH_RIGHT))
+        {
             movementProcessor(command(PRIO_MEDIUM, MOVE, 30, RIGHT));
+            Wait(200);
+        }
 
         Wait(100);
     }
@@ -442,11 +484,15 @@ task main()
     global.sonarValues = sonarValues;
 
 
-    /*movementProcessor(command(PRIO_MEDIUM, MOVE, 10, FORWARD));*/
+    /*movementProcessor(command(PRIO_MEDIUM, MOVE, 30, BACK));*/
     /*until(!global.commandRunning.running);*/
     /*movementProcessor(command(PRIO_LOW, ROTATE, -180, 0));*/
+
     Wait(5000);
-    movementProcessor(command(PRIO_LOW, ROTATE, 90, 0));
+    /*movementProcessor(command(PRIO_LOW, ROTATE, 90, 0));*/
+
+    movementProcessor(command(PRIO_LOW, MOVE, 15, BACK));
+
     // Start threads
     Precedes(
             check_black_line,
