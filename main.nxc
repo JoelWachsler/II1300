@@ -363,7 +363,7 @@ task check_sonar_value()
         Wait(100);
 
         // Death grip fix
-        if(spotDeg < 15 && spotDeg > -15)
+        if(spotDeg < 10 && spotDeg > -10)
         {
             movementProcessor(command(PRIO_LOW, MOVE, spotVal + 10, FORWARD));
         }
@@ -378,8 +378,6 @@ task check_sonar_value()
         {
             // Rotate and go in that direction
             movementProcessor(command(PRIO_LOW, ROTATE, -spotDeg, 0));
-            /*until(!global.commandRunning.running);*/
-            /*movementProcessor(command(PRIO_MEDIUM, MOVE, spotVal, FORWARD));*/
         }
 
         Wait(100);
@@ -408,7 +406,7 @@ task check_black_line()
         StopTask(touch_sensor);
 
         // Go back
-        movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 30, BACK));
+        movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 20, BACK));
 
         // Rotate after task before completed
         until(!global.commandRunning.running || global.commandRunning.way != BACK);
@@ -431,27 +429,11 @@ task touch_sensor()
 
     while(true)
     {
-        // Check light value
-        /*if (Sensor(LIGHT_SENSOR) < LIGHT_THRESHOLD)*/
-        /*{*/
-            /*// Go back*/
-            /*movementProcessor(command(PRIO_SUPER_HIGH, MOVE, 1, BACK));*/
-
-            /*// Rotate after task before completed*/
-            /*until(!global.commandRunning.running || global.commandRunning.way != BACK);*/
-            /*movementProcessor(command(PRIO_HIGH, ROTATE, (randomBool() ? random_between(70, 180) : -random_between(70, 180)), 0));*/
-        /*}*/
-
         // Go forwards if sensor 1 and two are pushed in
         // Go left if sensor 1 is pushed in
         // Go right if sensor 2 is pushed in
         if (Sensor(TOUCH_LEFT) && Sensor(TOUCH_RIGHT))
         {
-            /*if (global.commandRunning.running && global.commandRunning.prio != PRIO_SUPER_HIGH)*/
-            /*{*/
-                /*StopTask(go);*/
-                /*StopTask(rotate);*/
-            /*}*/
             movementProcessor(command(PRIO_HIGH, MOVE, 30, FORWARD));
             Wait(200);
         }
@@ -483,10 +465,6 @@ task main()
     global.commandRunning = commandDefault();
     global.sonarValues = sonarValues;
 
-
-    /*movementProcessor(command(PRIO_MEDIUM, MOVE, 30, BACK));*/
-    /*until(!global.commandRunning.running);*/
-    /*movementProcessor(command(PRIO_LOW, ROTATE, -180, 0));*/
 
     Wait(5000);
     /*movementProcessor(command(PRIO_LOW, ROTATE, 90, 0));*/
