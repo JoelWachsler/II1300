@@ -1,4 +1,4 @@
-# Lego Group 18 - Lego Mindstorms mini project
+## Lego Group 18 - Lego Mindstorms mini project - Ingenjörsmetodik, II1300
 
 <h6>Author:</h6>
 <p>Joel Wachsler</p>
